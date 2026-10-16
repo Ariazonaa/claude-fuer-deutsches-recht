@@ -1,3 +1,9 @@
+# strafvollzug-jva-v1.1.0 – 2026-10-16
+
+Zwei lebensnahe Akten aus Hessen und Baden-Württemberg ergänzen den Bestand um 68 Originaldateien. Sie verbinden Absonderung, streitige Gewaltvorwürfe, Suizidprävention, Schutzmaterial, Raum- und Belegungsdaten mit früheren anwaltlichen Anträgen, gerichtlichen Beschlüssen und bearbeitbaren Folgeentwürfen. Die vier bisherigen Akten bleiben erhalten.
+
+Elf Skills, Werkstatt und kompakte Prompts vertiefen die Prüfung von Landesrecht, Fortdauer, Beweisen und gerichtlicher Aufklärung. Der Landeswegweiser trennt amtlich gelesene aktuelle Normen, Rechercheeinstiege und historische Verwaltungsvorschriften. Zusätzliche Entscheidungsanker erläutern ihre konkrete Tragweite und Grenze. Sechs Akten, 132 Originaldateien und 30 Release-Dateien werden mit Quellen, Anhängen, Tabellen und Lesefassungen abgestimmt.
+
 # prompt-einstiege-v1.0.1 – 2026-10-16
 
 Der Synchronisierer der eingebundenen Vergaberecht-Werkstatt erhält die sechs individuell redigierten veröffentlichten Rollenprompts, sofern deren bestehende dateigebundene Qualitätsnachweise gültig sind. Fehlender oder abweichender Nachweis führt zum Fehler, nicht zum Überschreiben durch ältere Generatorquellen. Importregressionen prüfen Abgleich und Manipulationserkennung bereits außerhalb des Komponentenworkflows. Der vollständige Schnelltest der Komponente ergänzt die abschließenden lokalen Prüfläufe.
