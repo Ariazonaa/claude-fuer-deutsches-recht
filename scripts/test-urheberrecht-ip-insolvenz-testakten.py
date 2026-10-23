@@ -32,9 +32,9 @@ MODULES = (
 )
 ARTIFACT_MANIFEST = ROOT / "quality" / "legal" / "urheberrecht-ip-insolvenz-artifact-manifest.json"
 MINIMUM_DOCUMENTS = {
-    "markenrechte-sicherungsuebertragung-insolvenz-mannheim": 28,
-    "kurpfalz-taxware-software-ip-insolvenz": 40,
-    "filmrechte-sicherungsuebertragung-insolvenz-schwetzingen": 30,
+    "markenrechte-sicherungsuebertragung-insolvenz-mannheim": 45,
+    "kurpfalz-taxware-software-ip-insolvenz": 56,
+    "filmrechte-sicherungsuebertragung-insolvenz-schwetzingen": 56,
 }
 ALLOWED_KINDS = {"docx", "pdf", "xlsx", "csv", "eml"}
 PROHIBITED_SOLUTION_TEXT = re.compile(
@@ -42,6 +42,88 @@ PROHIBITED_SOLUTION_TEXT = re.compile(
     re.IGNORECASE,
 )
 DECIMAL_HEADING = re.compile(r"^\d+(?:\.\d+)*\.?\s+\S")
+MAIN_DEBT_MARKERS = {
+    "markenrechte-sicherungsuebertragung-insolvenz-mannheim": (
+        "KT-2024-021",
+        "180.000",
+        "40.000",
+        "220.000",
+        "act/360",
+    ),
+    "kurpfalz-taxware-software-ip-insolvenz": (
+        "RK-2023-4471",
+        "2.400.000",
+        "400.000",
+        "2.000.000",
+        "18.000",
+        "2.382.000",
+    ),
+    "filmrechte-sicherungsuebertragung-insolvenz-schwetzingen": (
+        "KLP-2024-0418",
+        "KD-2417-01",
+        "2.150.000",
+        "710.000",
+        "1.440.000",
+        "36.830,44",
+        "1.476.830,44",
+    ),
+}
+
+
+def assert_main_debt_security_chain(case: dict) -> None:
+    """Verlangt für jede Akte getrennte Primärbelege vom Vertrag bis zum Saldo."""
+
+    slug = case["slug"]
+    documents = case["documents"]
+
+    def path(document: dict) -> str:
+        return document["path"].lower()
+
+    def matching(predicate) -> list[dict]:
+        return [document for document in documents if predicate(document)]
+
+    requirements = {
+        "Darlehensvertrag": lambda d: d["kind"] in {"pdf", "docx"}
+        and "darlehen" in path(d)
+        and "konto" not in path(d),
+        "Sicherungsabrede": lambda d: d["kind"] in {"pdf", "docx"}
+        and any(token in path(d) for token in ("sicherungsvertrag", "sicherungsuebertragung", "sicherungsabtretung")),
+        "Auszahlungsvoraussetzungen": lambda d: d["kind"] == "xlsx"
+        and any(token in path(d) for token in ("auszahlungsvoraus", "cp_", "cp-")),
+        "Auszahlungs- oder Valutabeleg": lambda d: d["kind"] == "pdf"
+        and any(token in path(d) for token in ("auszahlungsanzeige", "ausfuehrungsbeleg", "sepa_", "valutabeleg", "bankfreigabe")),
+        "Schuldner- oder Projektkontoauszug": lambda d: d["kind"] == "pdf"
+        and "kontoaus" in path(d),
+        "Darlehens- oder Kreditkonto": lambda d: d["kind"] == "xlsx"
+        and any(token in path(d) for token in ("darlehenskonto", "kreditkonto", "saldenstaffel")),
+        "Sicherungsfall oder Rechtsvorbehalt": lambda d: d["kind"] in {"pdf", "docx", "eml"}
+        and any(token in path(d) for token in ("sicherungsfall", "rechtsvorbehalt", "faelligstellung", "verwertungsankuendigung")),
+    }
+    for label, predicate in requirements.items():
+        found = matching(predicate)
+        assert found, f"{slug}: Primärbeleg fehlt: {label}"
+
+    drawdowns = matching(lambda d: d["kind"] == "eml" and "abruf" in path(d))
+    assert len(drawdowns) >= 2, f"{slug}: mindestens zwei getrennte Darlehensabrufe erwartet"
+
+    whole_text = nested_text(documents)
+    for term in (
+        "Sicherungszweck",
+        "Auszahlungsvoraussetzungen",
+        "Valuta",
+        "Tilgung",
+        "Kapital",
+        "Zinsen",
+        "Saldo",
+    ):
+        assert term.lower() in whole_text.lower(), f"{slug}: Hauptschuldkette ohne {term}"
+
+    for marker in MAIN_DEBT_MARKERS[slug]:
+        assert marker in whole_text, f"{slug}: Rechen- oder Vertragsmarker fehlt: {marker}"
+
+    assert "laut Bankstempel" not in whole_text, f"{slug}: spätere Ist-Buchung im Ex-ante-Vertrag"
+    for false_page_claim in ("trägt auf Seite 7 die Unterschriften", "Das vorliegende PDF enthält acht Seiten", "Scan 8 Seiten"):
+        assert false_page_claim not in whole_text, f"{slug}: falsche Seitenbehauptung: {false_page_claim}"
 
 
 def load_case(path: Path) -> dict:
@@ -153,6 +235,39 @@ def assert_source_case(case: dict) -> None:
     assert all(document["kind"] in ALLOWED_KINDS for document in documents)
     assert all(Path(document["path"]).suffix.lower() == f'.{document["kind"]}' for document in documents)
     assert not PROHIBITED_SOLUTION_TEXT.search(nested_text(documents)), f"{slug}: Lösungstext"
+    assert_main_debt_security_chain(case)
+
+    by_path = {document["path"]: document for document in documents}
+    if slug == "markenrechte-sicherungsuebertragung-insolvenz-mannheim":
+        mutable_register = "05_Anlage_1_Markenbestand.xlsx"
+        for mail_path in ("02A_Abruf_Tranche_1_16-02-2024.eml", "06_Auszahlung_und_Unterlagen.eml"):
+            assert mutable_register not in by_path[mail_path].get("attachments", ()), (
+                slug,
+                mail_path,
+                "spätere Registerfassung als historische Anlage",
+            )
+        cp_snapshot = nested_text(by_path["02B_CP_Check_und_Waiver_Tranche_1.xlsx"])
+        for future_marker in ("spätere Registerabschriften", "Anmeldung 09.04.2024", "erst später in Insolvenzakte"):
+            assert future_marker not in cp_snapshot, f"{slug}: CP-Snapshot enthält Zukunftswissen: {future_marker}"
+        apa_text = nested_text(by_path["30_Unterzeichneter_Asset_Purchase_Agreement.pdf"])
+        assert "Seite 38" not in apa_text, f"{slug}: falsche Seitenbehauptung im APA"
+        assert "qualifizierten elektronischen Signaturvermerke" not in apa_text, f"{slug}: unbelegte Signaturbehauptung im APA"
+    if slug == "kurpfalz-taxware-software-ip-insolvenz":
+        final_cp = "05_Finanzierung_Sicherheiten/12_Anlage_1_Auszahlungsvoraussetzungen.xlsx"
+        expected_snapshots = {
+            "05_Finanzierung_Sicherheiten/13_Abruf_Tranche_1.eml": "05_Finanzierung_Sicherheiten/12A_CP_Stand_Abruf_Tranche_1.xlsx",
+            "05_Finanzierung_Sicherheiten/16_Abruf_Tranche_2.eml": "05_Finanzierung_Sicherheiten/12B_CP_Stand_Abruf_Tranche_2.xlsx",
+        }
+        for mail_path, snapshot in expected_snapshots.items():
+            attachments = by_path[mail_path].get("attachments", ())
+            assert final_cp not in attachments, (slug, mail_path, "spätere CP-Endfassung als historische Anlage")
+            assert snapshot in attachments, (slug, mail_path, "datierter CP-Snapshot fehlt")
+    if slug == "filmrechte-sicherungsuebertragung-insolvenz-schwetzingen":
+        loan_text = nested_text(by_path["04_Finanzierung_Sicherheiten/01_Produktionsdarlehen.pdf"])
+        addendum_text = nested_text(by_path["04_Finanzierung_Sicherheiten/08_Nachtrag_Fertigstellungstranche_2025.pdf"])
+        assert "10. Januar 2025" not in loan_text, f"{slug}: Hauptvertrag erzählt späteren Nachtrag"
+        for later_date in ("21. Februar 2025", "17. Februar 2026"):
+            assert later_date not in addendum_text, f"{slug}: Nachtrag erzählt späteres Ereignis {later_date}"
 
     headings = [
         section["heading"]
